@@ -1,0 +1,12 @@
+name: sports_da_portfolio
+title: sports_da_portfolio
+username: sbw22
+account: sbw22
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 16367569
+bundleId: 11393497
+url: https://sbw22.shinyapps.io/sports_da_portfolio/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
