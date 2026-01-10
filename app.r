@@ -426,7 +426,7 @@ server = function(input, output, session) {
         if(is.null(results$player_names) || length(results$player_names) == 0) {
           showNotification("No results returned from clustering", type = "error")
           return()
-        }
+        } # :)
         
         
         # Convert updated results to dataframe
