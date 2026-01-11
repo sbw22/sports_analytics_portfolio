@@ -22,6 +22,13 @@ library(lubridate)
 library(rsconnect)
 library(reticulate)
 
+# Point to the same python you were using
+use_condaenv("base", required = TRUE)   # or whatever env you used
+
+# Force reload of module
+py_run_string("import sys; sys.modules.pop('your_python_filename', None)")
+
+
 
 # setwd("/Users/spencerweishaar/AthleteLab/sports_da_portfolio/")
 # Only set working directory when running locally (?)
@@ -45,10 +52,34 @@ source_python("/Users/spencerweishaar/AthleteLab/sports_da_portfolio/batter_posi
 csv_path <- "/Users/spencerweishaar/AthleteLab/sports_da_portfolio/batter_position/batting-stance.csv"
 results <- run_clustering_analysis(csv_path)
 
+print(paste("Type of results: ", typeof(results)))
+print(paste("Type of results$features: ", typeof(results$features)))
+print(paste("Length of results$player_names: ", length(results$player_names)))
+print(paste("Length of results$cluster_labels: ", length(results$cluster_labels)))
+print(paste("Length of results$outliers: ", length(results$outliers)))
+print(paste("Length of results$in_outliers: ", length(results$in_outliers)))
+print(paste("Length of results$feature_names: ", length(results$feature_names)))
+print(paste("Length of results$features: ", length(results$features)))
+
+
+# str(results$features)
+# dim(results$features)
+
+# If results_df has all I need for all the functionality I want to add to the app,
+# I think I can just use this dataframe going forward, and delete all the AI code.
+
+results_df = data.frame(results$features)
+colnames(results_df) <- results$feature_names
+results_df$in_outliers <- results$in_outliers
+results_df$player_names <- results$player_names
+results_df$cluster_labels <- results$cluster_labels
+quit()
+
 cluster_labels <- results$cluster_labels
 outliers <- results$outliers
+in_outliers <- results$in_outliers
 player_names <- results$player_names
-features <- results$features
+features <- do.call(rbind, results$features)
 feature_names <- results$feature_names
 
 # run_clustering_analysis parameters
@@ -275,7 +306,7 @@ server = function(input, output, session) {
       initial_df <- data.frame(
         player_name = initial_results$player_names,
         cluster_label = initial_results$cluster_labels,
-        is_outlier = initial_results$outliers,
+        in_outlier = initial_results$in_outliers,
         stringsAsFactors = FALSE
       )
       
@@ -391,34 +422,37 @@ server = function(input, output, session) {
         return()
       }
       
-      # Show that processing is happening
-      print("Applying filters...")
-      print(paste("Feature indices:", paste(params$feature_indices, collapse = ", ")))
-      print(paste("Feature indices class:", class(params$feature_indices)))
-      print(paste("Feature indices length:", length(params$feature_indices)))
+      print("=== APPLY FILTERS CLICKED ===")
+      print(paste("Feature indices from params:", paste(params$feature_indices, collapse = ", ")))
       print(paste("Min cluster size:", params$min_cluster_size))
       print(paste("Players ranked:", params$num_of_players_ranked))
       
-      # Ensure feature_indices are integers
-      feature_idx <- as.integer(params$feature_indices)
-      print(paste("Converted feature indices:", paste(feature_idx, collapse = ", ")))
-      print(paste("Converted class:", class(feature_idx)))
-      
       # Re-run the clustering analysis with updated parameters
       tryCatch({
+        # Force R to evaluate params before passing to Python
+        current_indices <- as.integer(params$feature_indices)
+        current_cluster_size <- as.integer(params$min_cluster_size)
+        current_players_ranked <- as.integer(params$num_of_players_ranked)
+        
+        print(paste("Sending to Python - indices:", paste(current_indices, collapse=", ")))
+        
         results <- run_clustering_analysis(
           csv_path,
-          feature_indices = params$feature_indices, # Pass as vector, not list
-          min_cluster_size = params$min_cluster_size,
-          num_of_players_ranked = params$num_of_players_ranked,
-          min_samples = params$min_samples,
-          num_of_players = params$num_of_players
+          feature_indices = current_indices,
+          min_cluster_size = current_cluster_size,
+          num_of_players_ranked = current_players_ranked,
+          min_samples = as.integer(params$min_samples),
+          num_of_players = as.integer(params$num_of_players)
         )
-   
+        
         # Debug: Check what Python returned
-        print("Results received from Python:")
+        print("=== RESULTS FROM PYTHON ===")
         print(paste("Player names length:", length(results$player_names)))
+        print(paste("Player names class:", class(results$player_names)))
         print(paste("Cluster labels length:", length(results$cluster_labels)))
+        print(paste("Cluster labels class:", class(results$cluster_labels)))
+        print(paste("Outliers length:", length(results$outliers)))
+        print(paste("Outliers class:", class(results$outliers)))
         print(paste("Features class:", class(results$features)))
         print(paste("Feature names:", paste(results$feature_names, collapse=", ")))
         
@@ -426,45 +460,102 @@ server = function(input, output, session) {
         if(is.null(results$player_names) || length(results$player_names) == 0) {
           showNotification("No results returned from clustering", type = "error")
           return()
-        } # :)
+        }
         
+        # Convert Python objects to R vectors explicitly
+        player_names_vec <- unlist(results$player_names)
+        cluster_labels_vec <- unlist(results$cluster_labels)
+        in_outliers_vec <- unlist(results$in_outliers)
         
-        # Convert updated results to dataframe
+        print("=== AFTER UNLIST ===")
+        print(paste("Player names length:", length(player_names_vec)))
+        print(paste("Cluster labels length:", length(cluster_labels_vec)))
+        print(paste("Outliers length:", length(in_outliers_vec)))
+        
+        # Create FRESH dataframe - don't build on existing one
         updated_df <- data.frame(
-          player_name = results$player_names,
-          cluster_label = results$cluster_labels,
-          is_outlier = results$outliers,
+          player_name = player_names_vec,
+          cluster_label = cluster_labels_vec,
+          in_outlier = in_outliers_vec,
           stringsAsFactors = FALSE
         )
         
-        print(paste("Base dataframe created with", nrow(updated_df), "rows"))
+        print(paste("Created base dataframe:", nrow(updated_df), "rows x", ncol(updated_df), "cols"))
+        print(paste("Column names:", paste(names(updated_df), collapse=", ")))
         
+        # Now check if it's correct before proceeding
+        if(ncol(updated_df) != 3) {
+          print(paste("ERROR: Base dataframe should have 3 columns but has", ncol(updated_df)))
+          showNotification("Error creating base dataframe", type = "error")
+          return()
+        }
         
-        cluster_labels <<- results$cluster_labels
-        outliers <<- results$outliers
-        player_names <<- results$player_names
-        features <<- results$features
-        feature_names <<- results$feature_names
+        # Add features ONLY if they exist and are valid
+        if(!is.null(results$features) && !is.null(results$feature_names) && 
+           length(results$feature_names) > 0) {
+          
+          # Convert features to matrix
+          features_data <- results$features
+          
+          # Handle different return types from Python
+          if(is.list(features_data)) {
+            # If it's a list, try to convert to matrix
+            # Each element might be a column
+            if(length(features_data) > 0 && is.numeric(features_data[[1]])) {
+              feature_matrix <- do.call(cbind, features_data)
+            } else {
+              print("Warning: Features is a list but can't convert to matrix")
+              feature_matrix <- NULL
+            }
+          } else if(is.vector(features_data)) {
+            feature_matrix <- matrix(features_data, ncol = 1)
+          } else {
+            feature_matrix <- as.matrix(features_data)
+          }
+          
+          if(!is.null(feature_matrix)) {
+            print(paste("Feature matrix:", nrow(feature_matrix), "rows x", ncol(feature_matrix), "cols"))
+            
+            # Verify dimensions match
+            if(nrow(feature_matrix) == nrow(updated_df) && ncol(feature_matrix) > 0) {
+              num_features <- min(ncol(feature_matrix), length(results$feature_names))
+              print(paste("Will add", num_features, "feature columns"))
+              
+              # Add each feature column
+              for(i in 1:num_features) {
+                col_name <- results$feature_names[i]
+                updated_df[[col_name]] <- feature_matrix[, i]
+                print(paste("  Added column:", col_name))
+              }
+              
+              print(paste("After adding features:", ncol(updated_df), "columns total"))
+            } else {
+              print(paste("ERROR: Dimension mismatch!"))
+              print(paste("  Feature matrix rows:", nrow(feature_matrix), "| Expected:", nrow(updated_df)))
+              print(paste("  Feature matrix cols:", ncol(feature_matrix)))
+            }
+          }
+        }
         
+        print("=== FINAL DATAFRAME INFO ===")
+        print(paste("Dimensions:", nrow(updated_df), "rows x", ncol(updated_df), "cols"))
+        print(paste("Column names:", paste(head(names(updated_df), 10), collapse=", ")))
         
-        # Add feature columns
-        #for(i in 1:ncol(results$features)) {
-        #  updated_df[[results$feature_names[i]]] <- results$features[, i]
-        #}
-        
-        # Update the reactive dataframe
-        clustering_results_df(updated_df)
-        
-        # Access results
-        print("Clustering complete!")
-        print(paste("Cluster labels length:", length(cluster_labels)))
-        print(paste("Player names length:", length(player_names)))
+        # Only update if dataframe looks correct
+        expected_cols <- 3 + length(results$feature_names)
+        if(ncol(updated_df) == expected_cols) {
+          clustering_results_df(updated_df)
+          showNotification("Clustering complete!", type = "message", duration = 3)
+          print("SUCCESS - Dataframe updated!")
+        } else {
+          print(paste("ERROR: Expected", expected_cols, "columns but got", ncol(updated_df)))
+          showNotification("Error: Unexpected number of columns in result", type = "error")
+        }
         
       }, error = function(e) {
-        print(paste("Error in clustering:", e$message))
+        print(paste("=== ERROR ==="))
+        print(paste("Error message:", e$message))
         showNotification(paste("Error:", e$message), type = "error", duration = 10)
-        
-        # NOTE: params have been updated, so use those values in outputs
       })
     }
   )

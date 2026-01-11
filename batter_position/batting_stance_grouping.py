@@ -69,8 +69,8 @@ def find_kmeans_clusters(feature1, feature2, feature_name1, feature_name2, playe
     # centroids = kmeans.cluster_centers_
     centroids_scaled = kmeans.cluster_centers_
     centroids = scaler.inverse_transform(centroids_scaled)
-    print(f"labels: {labels}")
-    print(f"Centroids: {centroids}")
+    # print(f"labels: {labels}")
+    # print(f"Centroids: {centroids}")
 
     # Plot the clusters
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -146,7 +146,7 @@ def find_hdbscan(list_of_stats, name_list, list_of_stat_names, MIN_CLUSTER_SIZE=
     # Apply HDBSCAN ################################################################################
     clusterer = hdbscan.HDBSCAN(min_cluster_size=MIN_CLUSTER_SIZE)
     cluster_labels = clusterer.fit_predict(X_pca)
-    print(f"Cluster labels: {cluster_labels}")
+    # print(f"Cluster labels: {cluster_labels}")
 
     # Group player names by their cluster labels
     cluster_groups_names = defaultdict(list)
@@ -194,7 +194,7 @@ def find_hdbscan(list_of_stats, name_list, list_of_stat_names, MIN_CLUSTER_SIZE=
 
             # print(f"Cluster {label}, Player {cluster_groups_names[label][idx]}, Stats: {stat}, type of {type(stat)}, type(stat[0]): {type(stat[0])}, stat_name: {stat_name}")
 
-    print(f"Cluster Groups and their Players:\n")
+    '''print(f"Cluster Groups and their Players:\n")
     for label, players in cluster_groups_names.items():
         print(f"  Cluster {label}: {players}\n")
     print(f"Average Stats per Cluster:\n\n")
@@ -206,9 +206,9 @@ def find_hdbscan(list_of_stats, name_list, list_of_stat_names, MIN_CLUSTER_SIZE=
             print(f"    {stat_name}: {avg_stat:.2f}")
         print(f"        Sum of all stats: {sum(avg_stats):.2f}")
         print()
-        temp_idx += 1
-        '''if temp_idx >= 5:
-            break'''
+        temp_idx += 1'''
+    '''if temp_idx >= 5:
+        break'''
 
 
     # Plot the results
@@ -262,14 +262,17 @@ def find_outliers(all_stats, name_list, stat_names, num_outliers=10):
 
     largest_outliers = heapq.nlargest(num_outliers, sums_of_player_stats)
 
-    print(f"\nAll stats: {stat_names}")
-    print(f"\nLargest outliers based on sum of all stats:\n")
+    # If player is an outlier, mark them
+    in_outliers = [0 for _ in range(len(name_list))]
+
+    # print(f"\nAll stats: {stat_names}")
+    # print(f"\nLargest outliers based on sum of all stats:\n")
     for i in range(len(largest_outliers)):
         outlier_index = sums_of_player_stats.index(largest_outliers[i])
         outlier_name = name_list[outlier_index]
-        print(f"{i+1}: {outlier_name} with a sum of {largest_outliers[i]}\n")
-    
-    return largest_outliers
+        # print(f"{i+1}: {outlier_name} with a sum of {largest_outliers[i]}\n")
+        in_outliers[outlier_index] = 1
+    return largest_outliers, in_outliers
     
 
 
@@ -417,21 +420,30 @@ def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_siz
 
     feature_names = [feature_names[i] for i in included_stat_indexes]
     
-    outliers = find_outliers(transposed_features, player_names, feature_names, num_of_players_ranked)
+    outliers, in_outliers = find_outliers(transposed_features, player_names, feature_names, num_of_players_ranked)
     cluster_labels = find_hdbscan(transposed_features, player_names, feature_names, min_cluster_size)
+
+    # 🔥 FIX: convert (features × players) → (players × features)
+    feature_matrix_for_r = transposed_features # .T
+
+    print(f"shape of feature_matrix_for_r: {feature_matrix_for_r.shape}")
+    print(f"shape of in_outliers: {len(in_outliers)}")
+    print(f"shape of cluster_labels: {len(cluster_labels)}")
+    print(f"\nlength of feature_matrix_for_r: {len(feature_matrix_for_r)}, length of first row: {len(feature_matrix_for_r[0])}\n")
     
     return {
         'cluster_labels': list(cluster_labels),
         'outliers': list(outliers),
+        'in_outliers': list(in_outliers),
         'player_names': list(player_names),
-        'features': features.tolist(),
+        'features': feature_matrix_for_r.tolist(), # Replaced features with feature_matrix_for_r
         'feature_names': feature_names
     }
 
 # Only run main() if this script is executed directly (not when imported by R)
-'''if __name__ == "__main__":
+# if __name__ == "__main__":
     # This will only run when you execute the Python script directly
     # It won't run when R sources it
-    main()
-    # run_clustering_analysis('batting-stance.csv')'''
+    # main()
+    run_clustering_analysis('batting-stance.csv')
 
