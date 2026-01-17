@@ -15,12 +15,53 @@ import hdbscan
 from sklearn.datasets import make_blobs
 
 
-def csv_files_import(csv_path='batting-stance.csv'):
-    batting_stance_df = pd.read_csv(csv_path)
-    batting_stances = batting_stance_df.to_dict(orient='records')
+def csv_files_import(csv_path='cbb_players_stats_2024-25.csv'):
+    player_stats_df = pd.read_csv(csv_path)
+    
+    if 'Name' not in player_stats_df.columns:
+        # Re-read with the second row as header
+        player_stats_df = pd.read_csv(csv_path, skiprows=1)
+
+    player_stats = player_stats_df.to_dict(orient='records')
+    
+    # print keys of the first record to understand available features
+    print(f"DEBUG: player_stats[0] keys in csv_files_import: {list(player_stats[0].keys())}")
+    # eirdshfj
 
     # list of dicts
-    return batting_stances
+    return player_stats
+
+
+def filter_players(player_stats, filter_data=[['None'], ['None'], ['None']]):
+
+    """
+    Filter players based on criteria in filter_data.
+    filter_data is a list of three strings:
+    [Team, Conference, Role]
+    If any of these is 'None', that filter is not applied.
+    """
+    filtered_stats = []
+
+    filter_team = filter_data[0] # List of teams to include
+    filter_conference = filter_data[1] # List of conferences to include
+    filter_roles = filter_data[2]  # List of roles to include
+
+    for player in player_stats:
+        player_team = player["TEAM"]
+        player_conference = player["CONF"]
+        player_role = player["ROLE"]
+
+        if player_team not in filter_team and 'None' not in filter_team:
+            continue
+        if player_conference not in filter_conference and 'None' not in filter_conference:
+            continue
+        if player_role not in filter_roles and 'None' not in filter_roles:
+            continue
+
+        filtered_stats.append(player)
+    
+    print(f"DEBUG: Filtered players from {len(player_stats)} to {len(filtered_stats)} based on criteria {filter_data}")
+    return filtered_stats
 
 
 def find_kmeans_clusters(feature1, feature2, feature_name1, feature_name2, player_names, n_clusters=3):
@@ -76,7 +117,7 @@ def find_kmeans_clusters(feature1, feature2, feature_name1, feature_name2, playe
     fig, ax = plt.subplots(figsize=(8, 6))
     scatter = ax.scatter(X_scaled[:, 0], X_scaled[:, 1], c=y_kmeans, cmap='viridis', marker='o', edgecolor='k', s=100)
     ax.scatter(centroids_scaled[:, 0], centroids_scaled[:, 1], c='red', marker='X', s=200, label='Centroids')
-    ax.set_title('KMeans Clustering of Batting Stances')
+    ax.set_title('KMeans Clustering of Player Stats')
     ax.set_xlabel(f"{feature_name1}")
     ax.set_ylabel(f"{feature_name2}")
 
@@ -138,14 +179,14 @@ def find_hdbscan(list_of_stats, name_list, list_of_stat_names, MIN_CLUSTER_SIZE=
 
     # Apply PCA for dimensionality reduction
     # PCA = Principle Component Analysis
-    pca = PCA(n_components=N_COMPONENTS)
-    X_pca = pca.fit_transform(X)
+    # pca = PCA(n_components=N_COMPONENTS)
+    # X_pca = pca.fit_transform(X)
 
-    X_pca = X
+    # X_pca = X
 
     # Apply HDBSCAN ################################################################################
     clusterer = hdbscan.HDBSCAN(min_cluster_size=MIN_CLUSTER_SIZE)
-    cluster_labels = clusterer.fit_predict(X_pca)
+    cluster_labels = clusterer.fit_predict(X) # Changed from X_pca to X
     # print(f"Cluster labels: {cluster_labels}")
 
     # Group player names by their cluster labels
@@ -256,6 +297,8 @@ def find_hdbscan(list_of_stats, name_list, list_of_stat_names, MIN_CLUSTER_SIZE=
 def find_outliers(all_stats, name_list, stat_names, num_outliers=10):
     # Find the top x outliers for each stat/sum of stats, using the IQR method or summing all the stats together
     sums_of_player_stats = []
+    # print names of all stats in all_stats
+    print(f"DEBUG: stat_names: {stat_names}")
     for i in range(len(name_list)):
         all_player_stats = [all_stats[j][i] for j in range(len(all_stats))]
         sums_of_player_stats.append(sum(all_player_stats))
@@ -280,28 +323,29 @@ def find_outliers(all_stats, name_list, stat_names, num_outliers=10):
 
 
 def main():
+    return
 
     print(f"in main")
     
 
     # Clean up code
     
-    batting_stances = csv_files_import()
+    player_stats = csv_files_import()
 
     # return
 
     # Separate names from numerical features
-    player_names = np.array([stance['name'] for stance in batting_stances])
+    player_names = np.array([stat['name'] for stat in player_stats])
 
     # Only include numerical features for clustering
-    features = np.array([[stance['avg_batter_y_position'], stance['avg_batter_x_position'], stance['avg_foot_sep'], stance['avg_stance_angle'], stance['avg_intercept_y_vs_batter'], stance['avg_intercept_y_vs_plate']] for stance in batting_stances])
-    feature_names = ['avg_batter_y_position', 'avg_batter_x_position', 'avg_foot_sep', 'avg_stance_angle', 'avg_intercept_y_vs_batter', 'avg_intercept_y_vs_plate']
-    print(f"batting_stances[0]: {batting_stances[0]}")
+    features = np.array([[stat['avg_batter_y_position'], stat['avg_batter_x_position'], stat['avg_foot_sep'], stat['avg_stat_angle'], stat['avg_intercept_y_vs_batter'], stat['avg_intercept_y_vs_plate']] for stat in player_stats])
+    feature_names = ['avg_batter_y_position', 'avg_batter_x_position', 'avg_foot_sep', 'avg_stat_angle', 'avg_intercept_y_vs_batter', 'avg_intercept_y_vs_plate']
+    print(f"player_stats[0]: {player_stats[0]}")
     
     num_of_players = -1
     features = features[:num_of_players]
     transposed_features = features.T
-    batting_stances = batting_stances[:num_of_players]
+    player_stats = player_stats[:num_of_players]
     player_names = player_names[:num_of_players]
 
     # PARAMETERS ##########################################################
@@ -327,12 +371,12 @@ def main():
 
     # print(f"labels shape: {labels.shape}")
     # add the kmeans cluster labels to the original data
-    for i, stance in enumerate(batting_stances):
-        stance['kmeans_label'] = kmeans_labels[i]
+    for i, stat in enumerate(player_stats):
+        stat['kmeans_label'] = kmeans_labels[i]
     
-    # print out the batting stances with their cluster labels
-    for stance in batting_stances:
-        print(f"Batter: {stance['name']}, KMeans Cluster: {stance['kmeans_label']}")
+    # print out the player stats with their cluster labels
+    for stat in player_stats:
+        print(f"Player: {stat['NAME']}, KMeans Cluster: {stat['kmeans_label']}")
 
 
 
@@ -342,7 +386,7 @@ def main():
 
 
 
-def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_size=5, num_of_players_ranked=25, min_samples=5, num_of_players=-1):
+def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_size=5, num_of_players_ranked=25, min_samples=5, num_of_players=-1, filter_data=['None', 'None', 'None']):
     """
     Main function to run the clustering analysis.
     Can be called from R with a custom CSV path.
@@ -363,31 +407,110 @@ def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_siz
     num_of_players = int(num_of_players)
 
     if csv_path is None:
-        csv_path = 'batting-stance.csv'
+        csv_path = 'cbb_players_stats_2024-25.csv'
     
-    batting_stances = csv_files_import(csv_path)
+    player_stats = csv_files_import(csv_path)
+
+    # Apply filtering if specified (Teams, Conferences, Roles)
+    print(f"DEBUG: filter_data before filtering: {filter_data}")
+    filtered_player_stats = filter_players(player_stats, filter_data)
+    print(f"DEBUG: Number of players after filtering: {len(filtered_player_stats)}")
+    num_features = len(feature_indices) if feature_indices else 3
+    
+    # Require at least 3x the cluster size AND more samples than features
+    min_required = max(
+        min_cluster_size * 3,  # At least 3x the cluster size
+        num_features + 5,      # At least 5 more than number of features
+        10                     # Absolute minimum of 10 players
+    )
+
+    min_required = 2 # Set to two for testing purposes only, remove later (maybe)
+
+    fallback_warning = None
+    
+    if len(filtered_player_stats) < min_required:
+        fallback_warning = (
+            f"Not enough players after filtering. Found {len(filtered_player_stats)} players, "
+            f"but need at least {min_required} for meaningful clustering. "
+            f"Current number of players: {len(filtered_player_stats)}. "
+            f"(Min cluster size: {min_cluster_size}, Features: {num_features})"
+            f"Defaulting to unfiltered data."
+        )
+        print(f"WARNING: {fallback_warning}")
+
+        player_stats = player_stats
+    else:
+        player_stats = filtered_player_stats
+
+    #print dict keys for first player stat to understand available features
+    print(f"DEBUG: player_stats[0] keys: {list(player_stats[0].keys())}")
     
     # Separate names from numerical features
-    player_names = np.array([stance['name'] for stance in batting_stances])
+    player_names = np.array([stat['NAME'] for stat in player_stats])
     
     # Only include numerical features for clustering
-    features = np.array([[stance['avg_batter_y_position'], 
-                         stance['avg_batter_x_position'], 
-                         stance['avg_foot_sep'], 
-                         stance['avg_stance_angle'], 
-                         stance['avg_intercept_y_vs_batter'], 
-                         stance['avg_intercept_y_vs_plate']] 
-                        for stance in batting_stances])
-    feature_names = ['avg_batter_y_position', 'avg_batter_x_position', 
-                     'avg_foot_sep', 'avg_stance_angle', 
-                     'avg_intercept_y_vs_batter', 'avg_intercept_y_vs_plate']
+    features = np.array([[stat['MIN%'], 
+                         stat['PRPG!'], 
+                         stat['D-PRPG'], 
+                         stat['BPM'], 
+                         stat['OBPM'], 
+                         stat['DBPM'],
+                         stat['ORTG'], 
+                         stat['DRTG'], 
+                         stat['USG'], 
+                         stat['EFG'], 
+                         stat['TS'], 
+                         stat['OR'],
+                         stat['DR'], 
+                         stat['AST'], 
+                         stat['TO'], 
+                         stat['A/TO'], 
+                         stat['BLK'], 
+                         stat['STL'],
+                         stat['FTR'], 
+                         stat['FC/40'], 
+                         stat['DUNKS %'], 
+                         stat['CLOSE 2 %'],
+                         stat['FAR 2 %'], 
+                         stat['FT %'], 
+                         stat['2P %'],
+                         stat['3P/100'], 
+                         stat['3P %']] 
+                        for stat in player_stats])
+    feature_names = ['MIN%', 
+                     'PRPG!', 
+                     'D-PRPG', 
+                     'BPM', 
+                     'OBPM', 
+                     'DBPM',
+                     'ORTG', 
+                     'DRTG', 
+                     'USG', 
+                     'EFG', 
+                     'TS', 
+                     'OR', 
+                     'DR', 
+                     'AST', 
+                     'TO', 
+                     'A/TO', 
+                     'BLK', 
+                     'STL',
+                     'FTR', 
+                     'FC/40', 
+                     'DUNKS %', 
+                     'CLOSE 2 %',
+                     'FAR 2 %', 
+                     'FT %', 
+                     '2P %',
+                     '3P/100', 
+                     '3P %']
     
     print(f"DEBUG: num_of_players type: {type(num_of_players)}, value: {num_of_players}")
     
     num_of_players = num_of_players
     features = features[:num_of_players]
     transposed_features = features.T
-    batting_stances = batting_stances[:num_of_players]
+    player_stats = player_stats[:num_of_players]
     player_names = player_names[:num_of_players]
 
     print(f"DEBUG: transposed_features shape before indexing: {transposed_features.shape}")
@@ -437,7 +560,8 @@ def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_siz
         'in_outliers': list(in_outliers),
         'player_names': list(player_names),
         'features': feature_matrix_for_r.tolist(), # Replaced features with feature_matrix_for_r
-        'feature_names': feature_names
+        'feature_names': feature_names,
+        'warning': fallback_warning  # NEW: Add warning message
     }
 
 # Only run main() if this script is executed directly (not when imported by R)
@@ -445,5 +569,6 @@ def run_clustering_analysis(csv_path=None, feature_indices=None, min_cluster_siz
     # This will only run when you execute the Python script directly
     # It won't run when R sources it
     # main()
-    run_clustering_analysis('batting-stance.csv')
+    # run_clustering_analysis('cbb_players_stats_2024-25.csv')
+
 

@@ -26,7 +26,7 @@ library(reticulate)
 use_condaenv("base", required = TRUE)   # or whatever env you used
 
 # Force reload of module
-py_run_string("import sys; sys.modules.pop('your_python_filename', None)")
+py_run_string("import sys; sys.modules.pop('your_python_filename', None)") # (?)
 
 
 
@@ -49,7 +49,7 @@ py_require(c("pandas", "matplotlib", "scikit-learn", "hdbscan"))
 source_python("/Users/spencerweishaar/AthleteLab/sports_da_portfolio/batter_position/batting_stance_grouping.py")
 
 # When you need to run the analysis, pass the full path:
-csv_path <- "/Users/spencerweishaar/AthleteLab/sports_da_portfolio/batter_position/batting-stance.csv"
+csv_path <- "/Users/spencerweishaar/AthleteLab/sports_da_portfolio/batter_position/cbb_players_stats_2024-25.csv"
 results <- run_clustering_analysis(csv_path)
 
 print(paste("Type of results: ", typeof(results)))
@@ -77,7 +77,7 @@ print(paste("Length of results$features: ", length(results$features)))
 # feature_names <- results$feature_names
 
 # In beginning section
-results_df = data.frame(results$features)
+results_df <- data.frame(results$features)
 colnames(results_df) <- results$feature_names
 results_df$in_outliers <- results$in_outliers
 results_df$player_names <- results$player_names
@@ -124,9 +124,12 @@ print(feature_names)
 
 shooting_data <- fread("nba_data/nba_player_shooting_stats_2025-26.csv")
 per_game_data <- fread("nba_data/nba_player_per-game_stats_2025-26.csv")
+advanced_data <- fread("nba_data/nba_player_advanced_stats_2025-26.csv")
 
 Corner3_Percentiles <- fread("nba_data/nba_player_corner3_percentiles_2025-26.csv")
 Short2_Percentiles <- fread("nba_data/nba_player_short2_percentiles_2025-26.csv")
+
+cbb_players_stats <- fread("batter_position/cbb_players_stats_2024-25.csv")
 
 # temp_v <- Corner3_Percentiles$Corner3Usage_percentile
 # temp_v
@@ -137,7 +140,10 @@ Short2_Percentiles <- fread("nba_data/nba_player_short2_percentiles_2025-26.csv"
 
 # Remove the first two rows
 shooting_data <- shooting_data[-c(1,2), ]
-# Corner3_Percentiles <- Corner3_Percentiles[-c(736, 1472, 2208), ]
+# Make the second row the name of the columns
+cbb_players_stats <- setNames(cbb_players_stats, as.character(unlist(cbb_players_stats[2, ])))
+# Remove the first two rows
+cbb_players_stats <- cbb_players_stats[-c(1,2), ]
 
 
 ui <- navbarPage(
@@ -165,6 +171,12 @@ ui <- navbarPage(
                                       choices = sort(unique(shooting_data$V2))),
                         ),
                         mainPanel(
+                          fluidRow(DTOutput("Usage_Data")),
+                          br(),
+                          br(),
+                          br(),
+                          br(),
+                          br(),
                           fluidRow(plotOutput("Corner3_Percentiles")),
                           br(),
                           br(),
@@ -215,8 +227,49 @@ ui <- navbarPage(
                       # on the left, and metrics on the right on the main page.
                       sidebarLayout(
                         sidebarPanel(
-                          checkboxGroupInput("PositionStats", label = "Choose Batter Position Stats", 
-                                             choices = c("Average Batter Y Position", "Average Batter X Position", "Average Foot Seperation", "Average Stance Angle", "Average Intercept Y Versus Batter", "Average Intercept Y Versus Plate"),),
+                          # Remember to remove multiple=TRUE if using checkboxGroupInput
+                          # checkboxGroupInput("PlayerStats", label = "Choose Player Stats",
+                          selectizeInput("PlayerStats", label = "Choose Player Stats",
+                                             choices = c('MIN%', 
+                                                         'PRPG!', 
+                                                         'D-PRPG', 
+                                                         'BPM', 
+                                                         'OBPM', 
+                                                         'DBPM',
+                                                         'ORTG', 
+                                                         'DRTG', 
+                                                         'USG', 
+                                                         'EFG', 
+                                                         'TS', 
+                                                         'OR', 
+                                                         'DR', 
+                                                         'AST', 
+                                                         'TO', 
+                                                         'A/TO', 
+                                                         'BLK', 
+                                                         'STL',
+                                                         'FTR', 
+                                                         'FC/40', 
+                                                         'DUNKS %', 
+                                                         'CLOSE 2 %',
+                                                         'FAR 2 %', 
+                                                         'FT %', 
+                                                         '2P %',
+                                                         '3P/100', 
+                                                         '3P %'),
+                                         multiple = TRUE),
+                          
+                          selectizeInput("CBB_Teams", label = "Choose CBB Teams",
+                                      choices = sort(unique(cbb_players_stats$TEAM)),
+                                      multiple = TRUE),
+                          
+                          selectizeInput("CBB_Conferences", label = "Choose CBB Conferences",
+                                      choices = sort(unique(cbb_players_stats$CONF)),
+                                      multiple = TRUE),
+                          
+                          selectizeInput("CBB_Roles", label = "Choose CBB Roles",
+                                      choices = sort(unique(cbb_players_stats$ROLE)),
+                                      multiple = TRUE),
                         
                           sliderInput("PlayersRanked", label = "Number of Players Ranked", value = 10, min = 1, max = 50),
                           
@@ -226,7 +279,7 @@ ui <- navbarPage(
                           
                         ),
                         mainPanel(
-                          fluidRow(plotOutput("BattersBox"))
+                          fluidRow(plotlyOutput("HDBSCAN_Plot"))
                         ),
                       )
              )
@@ -252,12 +305,37 @@ ui <- navbarPage(
 # Start of the Server - Part 2 of App Structure
 # Creates the back end of the dataset
 server = function(input, output, session) {
-  position_choices <- c("Average Batter Y Position", 
-                        "Average Batter X Position", 
-                        "Average Foot Seperation", 
-                        "Average Stance Angle", 
-                        "Average Intercept Y Versus Batter", 
-                        "Average Intercept Y Versus Plate")
+  position_choices <- c('MIN%', 
+                        'PRPG!', 
+                        'D-PRPG', 
+                        'BPM', 
+                        'OBPM', 
+                        'DBPM',
+                        'ORTG', 
+                        'DRTG', 
+                        'USG', 
+                        'EFG', 
+                        'TS', 
+                        'OR', 
+                        'DR', 
+                        'AST', 
+                        'TO', 
+                        'A/TO', 
+                        'BLK', 
+                        'STL',
+                        'FTR', 
+                        'FC/40', 
+                        'DUNKS %', 
+                        'CLOSE 2 %',
+                        'FAR 2 %', 
+                        'FT %', 
+                        '2P %',
+                        '3P/100', 
+                        '3P %')
+  
+  team_names = sort(unique(cbb_players_stats$TEAM))
+  conference_names = sort(unique(cbb_players_stats$CONF))
+  role_names = sort(unique(cbb_players_stats$ROLE))
   
   # Create reactive values to store parameters
   params <- reactiveValues(
@@ -265,52 +343,59 @@ server = function(input, output, session) {
     min_cluster_size = 5,
     num_of_players_ranked = 25,
     min_samples = 5,
-    num_of_players = -1
+    num_of_players = -1,
+    team_name_indices = c(),  # Default to no teams
+    conference_names_indices = c(),  # Default to no conferences
+    role_names_indices = c()  # Default to no roles
+    
   )
+  
+  # Make results_df reactive
+  results_data <- reactiveVal(results_df)
   
   
   # Create a reactive dataframe for clustering results
-  clustering_results_df <- reactiveVal(NULL)
-  
-  # Initialize the dataframe on app start - wrapped in isolate to prevent reactive dependency issues
-  observeEvent(once = TRUE, ignoreNULL = FALSE, ignoreInit = FALSE, {
-    tryCatch({
-      print("Initializing clustering results...")
-      
-      initial_results <- run_clustering_analysis(
-        csv_path,
-        feature_indices = isolate(params$feature_indices),
-        min_cluster_size = isolate(params$min_cluster_size),
-        num_of_players_ranked = isolate(params$num_of_players_ranked),
-        min_samples = isolate(params$min_samples),
-        num_of_players = isolate(params$num_of_players)
-      )
-      
-      cluster_labels <- results$cluster_labels
-      outliers <- results$outliers
-      in_outliers <- results$in_outliers
-      player_names <- results$player_names
-      features <- do.call(rbind, results$features)
-      feature_names <- results$feature_names
-      
-      # In observe
-      results_df <<- data.frame(features)
-      colnames(results_df) <- feature_names
-      results_df$in_outliers <- in_outliers
-      results_df$player_names <- player_names
-      results_df$cluster_labels <- cluster_labels
-      
-      
-      
-    }, error = function(e) {
-      print(paste("Error in initialization:", e$message))
-      print("Full error:")
-      print(e)
-    })
-  }, {
-    # This empty block is the event we're observing (app startup)
-    TRUE
-  })
+  # clustering_results_df <- reactiveVal(NULL)
+  # 
+  # # Initialize the dataframe on app start - wrapped in isolate to prevent reactive dependency issues
+  # observeEvent(once = TRUE, ignoreNULL = FALSE, ignoreInit = FALSE, {
+  #   tryCatch({
+  #     print("Initializing clustering results...")
+  #     
+  #     initial_results <- run_clustering_analysis(
+  #       csv_path,
+  #       feature_indices = isolate(params$feature_indices),
+  #       min_cluster_size = isolate(params$min_cluster_size),
+  #       num_of_players_ranked = isolate(params$num_of_players_ranked),
+  #       min_samples = isolate(params$min_samples),
+  #       num_of_players = isolate(params$num_of_players)
+  #     )
+  #     
+  #     cluster_labels <- results$cluster_labels
+  #     outliers <- results$outliers
+  #     in_outliers <- results$in_outliers
+  #     player_names <- results$player_names
+  #     features <- do.call(rbind, results$features)
+  #     feature_names <- results$feature_names
+  #     
+  #     # In observe
+  #     results_df <<- data.frame(features)
+  #     colnames(results_df) <- feature_names
+  #     results_df$in_outliers <- in_outliers
+  #     results_df$player_names <- player_names
+  #     results_df$cluster_labels <- cluster_labels
+  #     
+  #     
+  #     
+  #   }, error = function(e) {
+  #     print(paste("Error in initialization:", e$message))
+  #     print("Full error:")
+  #     print(e)
+  #   })
+  # }, {
+  #   # This empty block is the event we're observing (app startup)
+  #   TRUE
+  # })
   
   
   
@@ -319,23 +404,60 @@ server = function(input, output, session) {
   
   
   #Players based on team
+  
   observeEvent(
     input$Team,
     updateSelectInput(session,
                       "Player", "Choose Player",
                       # changed levels(as.factor()) to sort(unique())
                       choices = sort(unique(filter(shooting_data,
-                                                     V4 == isolate(input$Team))$V2))))
+                                                   V4 == isolate(input$Team))$V2))))
+  
   
   
   observeEvent(
-    input$PositionStats,
-    # updateCheckboxGroupInput(session,
-    #                          "PositionStats", "Choose Batter Position Stats",
-    #                          choices = c("Average Batter Y Position", "Average Batter X Position", "Average Foot Seperation", "Average Stance Angle", "Average Intercept Y Versus Batter", "Average Intercept Y Versus Plate"),
-    #                          selected = isolate(input$PositionStats))
+    input$CBB_Teams,
     {
-      selected_indices <- which(position_choices %in% input$PositionStats)
+      # Why aren't these lists empty, instead of having None_ in them? What does having None_ do?
+      if (length(input$CBB_Teams) == 0) {
+        params$team_name_indices <- c("None_")
+      } else {
+        params$team_name_indices <- input$CBB_Teams
+      }
+    }
+  )
+  
+  observeEvent(
+    input$CBB_Conferences,
+    {
+      if (length(input$CBB_Conferences) == 0) {
+        params$conference_name_indices <- c("None_")
+      } else {
+        params$conference_name_indices <- input$CBB_Conferences
+      }
+    }
+  )
+  
+  observeEvent(
+    input$CBB_Roles,
+    {
+      if (length(input$CBB_Roles) == 0) {
+        params$role_name_indices <- c("None_")
+      } else {
+        params$role_name_indices <- input$CBB_Roles
+      }
+    }
+  )
+  
+  
+  observeEvent(
+    input$PlayerStats,
+    # updateCheckboxGroupInput(session,
+    #                          "PlayerStats", "Choose Batter Position Stats",
+    #                          choices = c("Average Batter Y Position", "Average Batter X Position", "Average Foot Seperation", "Average Stance Angle", "Average Intercept Y Versus Batter", "Average Intercept Y Versus Plate"),
+    #                          selected = isolate(input$PlayerStats))
+    {
+      selected_indices <- which(position_choices %in% input$PlayerStats)
       print(paste("Selected indices:", paste(selected_indices, collapse = ", ")))
       selected_indices <- as.integer(selected_indices - 1) # This is the index adjustment for Python (0-based indexing)
       # selected_indices <- lapply(selected_indices, as.integer)
@@ -365,10 +487,35 @@ server = function(input, output, session) {
     input$ApplyFilters,
     {
       # Validate that at least one feature is selected
-      if(length(params$feature_indices) == 0) {
-        showNotification("Please select at least one position stat", type = "error")
+      if(length(params$feature_indices) < 2) {
+        showNotification("Please select at least two position stats", type = "error")
         return()
       }
+      # if (length(params$team_name_indices) < 1) {
+      #   # params$team_name_indices <- c(-1)  # Default to all teams
+      #   params$team_name_indices <- c("None_")  # Default to all teams
+      # }
+      # if (length(params$conference_name_indices) < 1) {
+      #   # params$conference_name_indices <- c(-1)  # Default to all conferences
+      #   params$conference_name_indices <- c("None_")  # Default to all conferences
+      # }
+      # if (length(params$role_name_indices) < 1) {
+      #   # params$role_name_indices <- c(-1)  # Default to all roles
+      #   params$role_name_indices <- c("None_")  # Default to all roles
+      # }
+      
+      # Use empty vectors instead of "None_" for no filters
+      # team_filter <- if (length(params$team_name_indices) < 1) c("None_") else params$team_name_indices
+      # conf_filter <- if (length(params$conference_name_indices) < 1) c("None_") else params$conference_name_indices
+      # role_filter <- if (length(params$role_name_indices) < 1) c("None_") else params$role_name_indices
+       
+      
+      # Put all filter lists into one list for python
+      filter_lists <- list(
+        params$team_name_indices,
+        params$conference_name_indices,
+        params$role_name_indices
+      )
       
       print("=== APPLY FILTERS CLICKED ===")
       print(paste("Feature indices from params:", paste(params$feature_indices, collapse = ", ")))
@@ -385,8 +532,35 @@ server = function(input, output, session) {
           min_cluster_size = params$min_cluster_size,
           num_of_players_ranked = params$num_of_players_ranked,
           min_samples = as.integer(params$min_samples),
-          num_of_players = as.integer(params$num_of_players)
+          num_of_players = as.integer(params$num_of_players),
+          filter_data = filter_lists
+          
         )
+        
+        # Check if there's a warning from Python
+        if (!is.null(results$warning)) {
+          showNotification(
+            results$warning,
+            type = "warning",
+            duration = 10
+          )
+          # FIll filter_lists with nones
+          filter_lists <- list(
+            c("None_"),
+            c("None_"),
+            c("None_")
+          )
+          # Call Python function again with no filters
+          results <- run_clustering_analysis(
+            csv_path,
+            feature_indices = params$feature_indices,
+            min_cluster_size = params$min_cluster_size,
+            num_of_players_ranked = params$num_of_players_ranked,
+            min_samples = as.integer(params$min_samples),
+            num_of_players = as.integer(params$num_of_players),
+            filter_data = filter_lists
+          )
+        }
         
         # Debug: Check what Python returned
         print("=== RESULTS FROM PYTHON ===")
@@ -398,29 +572,17 @@ server = function(input, output, session) {
         print(paste("Outliers class:", class(results$outliers)))
         print(paste("Features class:", class(results$features)))
         print(paste("Feature names:", paste(results$feature_names, collapse=", ")))
-        
-        initial_results <- run_clustering_analysis(
-          csv_path,
-          feature_indices = isolate(params$feature_indices),
-          min_cluster_size = isolate(params$min_cluster_size),
-          num_of_players_ranked = isolate(params$num_of_players_ranked),
-          min_samples = isolate(params$min_samples),
-          num_of_players = isolate(params$num_of_players)
-        )
-        
-        cluster_labels <- results$cluster_labels
-        outliers <- results$outliers
-        in_outliers <- results$in_outliers
-        player_names <- results$player_names
-        features <- do.call(rbind, results$features)
-        feature_names <- results$feature_names
+    
         
         # In apply changes
-        results_df <<- data.frame(features)
-        colnames(results_df) <- feature_names
-        results_df$in_outliers <- in_outliers
-        results_df$player_names <- player_names
-        results_df$cluster_labels <- cluster_labels
+        updated_results_df <- data.frame(results$features)
+        colnames(updated_results_df) <- results$feature_names
+        updated_results_df$in_outliers <- results$in_outliers
+        updated_results_df$player_names <- results$player_names
+        updated_results_df$cluster_labels <- results$cluster_labels
+        
+        # results_df <<- updated_results_df
+        results_data(updated_results_df)
         
       }, error = function(e) {
         print(paste("=== ERROR ==="))
@@ -432,7 +594,68 @@ server = function(input, output, session) {
   
   
   
-  output$BattersBox <- renderPlot({
+  output$HDBSCAN_Plot <- renderPlotly({
+    
+    # plot_data <- results_df
+    plot_data <- results_data()  # Use the reactive value
+    plot_data$x_var <- plot_data[[1]]
+    plot_data$y_var <- plot_data[[2]]
+    # Convert cluster_labels to a proper vector if it's a list
+    plot_data$cluster_labels <- unlist(plot_data$cluster_labels)
+    
+    hdbscan_scatterplot <- ggplot(plot_data, aes(x = x_var, 
+                                                  y = y_var,
+                                                  color = as.factor(cluster_labels),
+                                                  shape = as.factor(in_outliers),
+                                                  text = paste0(player_names))) +
+      geom_point(alpha = 0.6) +
+      # xlim(0, 1) +  # Set x-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
+      # ylim(0, 1) +  # Set y-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
+      # scale_size_continuous(range = c(2, 12)) + #, limits = c(0, 500)) +  # Fix size range and data limits
+      # scale_color_manual(values = c("Selected" = "#2952a3", "Other" = "#9b9b9b"), name = "Player") +
+      # guides(color = "none") +  # Add this line to hide the color legend
+      ggtitle(paste("HDBSCAN Plot for All Players")) +
+      labs(x = names(plot_data)[1], y = names(plot_data)[2], color = "Cluster") # +
+    # guides(size = guide_legend(override.aes = list(alpha = 1))) +  # Makes legend points fully opaque
+    # theme(legend.position = "bottom")
+    # Legend isn't showing up for some reason, idk why
+    ggplotly(hdbscan_scatterplot, tooltip = "text")
+  })
+  
+  
+  output$Usage_Data <- renderDT({
+    
+    player_data <- advanced_data%>%
+      filter(Team == input$Team,
+             Player == input$Player)
+    
+    player_data$MPG <- player_data$MP/player_data$G
+    player_data$Age <- per_game_data$Age[per_game_data$Team == input$Team & per_game_data$Player == input$Player]
+
+    player_data <- player_data %>% 
+      select("Pos", "Age", "MPG", "PER", "BPM")
+    
+    # player_data <- subset(player_data, select = c(2,3,4,5,6,7))
+    
+    # Multiply value by 100
+    # Tip: double brackets to target value(s) in a data frame
+    # player_data[[3]] <- as.numeric(player_data[[3]]) * 100
+    # player_data[[4]] <- as.numeric(player_data[[4]]) * 100
+    # player_data[[5]] <- as.numeric(player_data[[5]]) * 100
+    
+    names(player_data)[1] <- "Position"
+    names(player_data)[2] <- "Age"
+    names(player_data)[3] <- "Minutes Per Game"
+    names(player_data)[4] <- "Player Efficiency Rating"
+    names(player_data)[5] <- "Box Plus-Minus"
+    
+    
+    # datatable (?) (everything in it too)
+    datatable(player_data, caption = htmltools::tags$caption( style = 'caption-side: top; 
+                                                  text-align: center; color:black; font-size:200% ;',
+                                                      'Player Summary'), options = list(dom = 't', columnDefs = list(list(targets = 0, visible = FALSE)))) %>%
+      formatStyle(c(1), `border-left` = "solid 1px") %>% formatStyle(c(5), `border-right` = "solid 1px") %>%
+      formatRound(columns = c(3, 4, 5), digits = 1)  # Format columns 3-6 to 2 decimal places
     
   })
   
@@ -670,7 +893,9 @@ server = function(input, output, session) {
   
   
   output$Corner3_Team_Scatterplot <- renderPlotly({
-    # Placeholder for future scatterplot
+    league_avg_C3_usage <- mean(Corner3_Percentiles$`Corner3 Usage`[Corner3_Percentiles$Temp == "Rate"], na.rm = TRUE)
+    league_avg_C3_fgperc <- mean(Corner3_Percentiles$`Corner 3P%`[Corner3_Percentiles$Temp == "Rate"], na.rm = TRUE)
+    
     team_data <- Corner3_Percentiles %>%
       filter(V4 == input$Team,
              Temp == "Rate") %>%
@@ -683,16 +908,23 @@ server = function(input, output, session) {
                                               color = is_selected,
                                               text = paste0(V2, "\n3PA: ", `3PA`))) +
       geom_point(alpha = 0.6) +
+      # Add vertical line with aes for legend
+      geom_vline(aes(xintercept = league_avg_C3_usage, linetype = "League Avg Usage"), 
+                 color = "red") +
+      # Add horizontal line with aes for legend
+      geom_hline(aes(yintercept = league_avg_C3_fgperc, linetype = "League Avg FG%"), 
+                 color = "red") +
       xlim(0, 1) +  # Set x-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
       ylim(0, 1) +  # Set y-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
       scale_size_continuous(range = c(2, 12)) + #, limits = c(0, 500)) +  # Fix size range and data limits
       scale_color_manual(values = c("Selected" = "#2952a3", "Other" = "#9b9b9b"), name = "Player") +
       # guides(color = "none") +  # Add this line to hide the color legend
+      scale_linetype_manual(name = "Reference Lines and",
+                            values = c("League Avg Usage" = "dashed", 
+                                       "League Avg FG%" = "dashed")) +
       ggtitle(paste("Corner 3 Usage vs Corner 3P% vs 3PA for", input$Team)) +
       labs(size = "3-Point Attempts")  # This adds a title to the size legend
-      # guides(size = guide_legend(override.aes = list(alpha = 1))) +  # Makes legend points fully opaque
-      # theme(legend.position = "bottom")
-      # Legend isn't showing up for some reason, idk why
+      # Add manual linetype scale to control the legend
     ggplotly(team_scatterplot, tooltip = "text")
     
     
@@ -932,6 +1164,9 @@ server = function(input, output, session) {
   
   
   output$Short2_Team_Scatterplot <- renderPlotly({
+    league_avg_S2_usage <- mean(Short2_Percentiles$`Short2 Usage`[Short2_Percentiles$Temp == "Rate"], na.rm = TRUE)
+    league_avg_S2_fgperc <- mean(Short2_Percentiles$`Short 2P%`[Short2_Percentiles$Temp == "Rate"], na.rm = TRUE)
+    
     # Placeholder for future scatterplot
     team_data <- Short2_Percentiles %>%
       filter(V4 == input$Team,
@@ -945,10 +1180,19 @@ server = function(input, output, session) {
                                               color = is_selected,
                                               text = paste0(V2, "\n2PA: ", `2PA`))) +
       geom_point(alpha = 0.6) +
+      # Add vertical line with aes for legend
+      geom_vline(aes(xintercept = league_avg_S2_usage, linetype = "League Avg Usage"), 
+                 color = "red") +
+      # Add horizontal line with aes for legend
+      geom_hline(aes(yintercept = league_avg_S2_fgperc, linetype = "League Avg FG%"), 
+                 color = "red") +
       xlim(0, 1) +  # Set x-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
       ylim(0, 1) +  # Set y-axis from 0 to 1 (or 0 to 100 if your data is in percentages)
       scale_size_continuous(range = c(2, 12)) + #, limits = c(0, 500)) +  # Fix size range and data limits
-      scale_color_manual(values = c("Selected" = "#2952a3", "Other" = "#9b9b9b")) + #, name = "Player") +
+      scale_color_manual(values = c("Selected" = "#2952a3", "Other" = "#9b9b9b"), name = "Player") +
+      scale_linetype_manual(name = "Reference Lines and",
+                            values = c("League Avg Usage" = "dashed", 
+                                       "League Avg FG%" = "dashed")) +
       ggtitle(paste("Short 2 Usage vs Short 2P% vs 2PA for", input$Team)) +
       labs(size = "2-Point Attempts")  # This adds a title to the size legend
     # guides(size = guide_legend(override.aes = list(alpha = 1))) +  # Makes legend points fully opaque
